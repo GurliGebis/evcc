@@ -148,17 +148,20 @@ func NewFoxESSEVC(ctx context.Context, uri string, slaveID uint8, pbox bool) (ap
 	}
 	if b, err := wb.conn.ReadHoldingRegisters(seedReg, 1); err == nil {
 		wb.current = binary.BigEndian.Uint16(b)
+		wb.log.DEBUG.Printf("startup: seeded current reg=0x%04X val=%d", seedReg, wb.current)
 	}
 	if b, err := wb.conn.ReadHoldingRegisters(foxRegStatus, 1); err == nil {
 		s := binary.BigEndian.Uint16(b)
 		wb.lastEnabled = s == 2 || s == 3 || s == 9
+		wb.log.DEBUG.Printf("startup: seeded lastEnabled=%v from status=%d", wb.lastEnabled, s)
 	}
 
 	return wb, nil
 }
 
-// writeReg writes a single read/write register (0x10)
+// writeReg writes a single read/write register (FC 0x10)
 func (wb *FoxESSEVC) writeReg(reg, val uint16) error {
+	wb.log.DEBUG.Printf("writeReg: reg=0x%04X val=%d (FC 0x10)", reg, val)
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, val)
 
@@ -173,9 +176,13 @@ func (wb *FoxESSEVC) writeReg(reg, val uint16) error {
 func (wb *FoxESSEVC) ensureReg(reg, val uint16) error {
 	b, err := wb.conn.ReadHoldingRegisters(reg, 1)
 	if err != nil {
+		wb.log.DEBUG.Printf("ensureReg: read reg=0x%04X failed: %v", reg, err)
 		return err
 	}
-	if binary.BigEndian.Uint16(b) == val {
+	cur := binary.BigEndian.Uint16(b)
+	wb.log.DEBUG.Printf("ensureReg: reg=0x%04X current=%d want=%d", reg, cur, val)
+	if cur == val {
+		wb.log.DEBUG.Printf("ensureReg: reg=0x%04X already at %d, skipping write", reg, val)
 		return nil
 	}
 	return wb.writeReg(reg, val)
@@ -202,9 +209,11 @@ func (wb *FoxESSEVC) heartbeat(ctx context.Context) {
 		lastEnabled := wb.lastEnabled
 		wb.mu.Unlock()
 
+		wb.log.DEBUG.Printf("heartbeat: enabled=%v lastEnabled=%v cur=%d pbox=%v", enabled, lastEnabled, cur, pbox)
+
 		var err error
 		if !enabled && lastEnabled {
-			// transition: send stop once
+			wb.log.DEBUG.Printf("heartbeat: sending stop (FC 0x06) reg=0x%04X val=%d", foxRegChargingControl, foxChargingStop)
 			_, err = wb.conn.WriteSingleRegister(foxRegChargingControl, foxChargingStop)
 			if err == nil {
 				wb.mu.Lock()
@@ -215,14 +224,19 @@ func (wb *FoxESSEVC) heartbeat(ctx context.Context) {
 			// keepalive read: resets the Time Validity timer so the charger stays
 			// online and does not fall back to Default Current and auto-start
 			_, err = wb.conn.ReadHoldingRegisters(foxRegStatus, 1)
+			wb.log.DEBUG.Println("heartbeat: keepalive read (disabled, maintaining EMS connection)")
 		} else if cur != 0 {
 			// always re-send the setpoint to keep the validity window alive;
 			// setpoint registers are inert when not charging so this is safe
 			if pbox {
+				wb.log.DEBUG.Printf("heartbeat: sending current setpoint reg=0x%04X val=%d", foxRegMaxCurrent, cur)
 				err = wb.ensureReg(foxRegMaxCurrent, cur)
 			} else {
+				wb.log.DEBUG.Printf("heartbeat: sending power setpoint reg=0x%04X val=%d", foxRegMaxPower, cur)
 				err = wb.ensureReg(foxRegMaxPower, cur)
 			}
+		} else {
+			wb.log.DEBUG.Println("heartbeat: nothing to send (no setpoint yet)")
 		}
 		if err != nil {
 			wb.log.ERROR.Println("heartbeat:", err)
@@ -285,7 +299,9 @@ func (wb *FoxESSEVC) Enabled() (bool, error) {
 		return false, err
 	}
 	s := binary.BigEndian.Uint16(b)
-	return s == 2 || s == 3 || s == 9, nil
+	enabled := s == 2 || s == 3 || s == 9
+	wb.log.DEBUG.Printf("Enabled: status=%d enabled=%v", s, enabled)
+	return enabled, nil
 }
 
 // Enable implements the api.Charger interface
@@ -299,6 +315,7 @@ func (wb *FoxESSEVC) Enable(enable bool) error {
 		val = foxChargingStart
 	}
 
+	wb.log.DEBUG.Printf("Enable: enable=%v writing reg=0x%04X val=%d (FC 0x06)", enable, foxRegChargingControl, val)
 	_, err := wb.conn.WriteSingleRegister(foxRegChargingControl, val)
 	if err != nil {
 		return err
@@ -319,6 +336,7 @@ func (wb *FoxESSEVC) Enable(enable bool) error {
 		if pbox {
 			reg = foxRegMaxCurrent
 		}
+		wb.log.DEBUG.Printf("Enable: pushing cached setpoint reg=0x%04X val=%d", reg, cur)
 		if err := wb.writeReg(reg, cur); err != nil {
 			wb.log.WARN.Printf("Enable: setpoint write failed: %v", err)
 		}
@@ -368,7 +386,10 @@ func (wb *FoxESSEVC) MaxCurrentMillis(current float64) error {
 	enabled := wb.enabled
 	wb.mu.Unlock()
 
+	wb.log.DEBUG.Printf("MaxCurrentMillis: pbox=%v reg=0x%04X val=%d current=%.1fA enabled=%v", wb.pbox, reg, val, current, enabled)
+
 	if !enabled {
+		wb.log.DEBUG.Printf("MaxCurrentMillis: deferring setpoint write until enabled")
 		return nil
 	}
 
