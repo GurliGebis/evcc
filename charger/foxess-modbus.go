@@ -220,6 +220,7 @@ func (wb *FoxESSEVC) heartbeat(ctx context.Context) {
 		pbox := wb.pbox
 		enabled := wb.enabled
 		lastEnabled := wb.lastEnabled
+		finished := wb.finished
 		wb.mu.Unlock()
 
 		var err error
@@ -231,9 +232,11 @@ func (wb *FoxESSEVC) heartbeat(ctx context.Context) {
 				wb.lastEnabled = false
 				wb.mu.Unlock()
 			}
-		} else if !enabled {
+		} else if !enabled || finished {
 			// keepalive read: resets the Time Validity timer so the charger stays
-			// online and does not fall back to Default Current and auto-start
+			// online and does not fall back to Default Current and auto-start.
+			// Also used once the session has finished: the setpoint registers are
+			// pointless to re-send since the charger will not resume on its own.
 			_, err = wb.conn.ReadHoldingRegisters(foxRegStatus, 1)
 		} else if cur != 0 {
 			// always re-send the setpoint to keep the validity window alive;
@@ -316,7 +319,20 @@ func (wb *FoxESSEVC) Status() (api.ChargeStatus, error) {
 // Statuses 2 (start), 3 (charging), 9 (auto phase switch) indicate the
 // charger is actively enabled; all others (idle, connected/waiting, pause,
 // finish, fault, locked) indicate it is not.
+//
+// Once the session has finished (see Status), this reports true regardless of
+// the register: evcc has no way to know the car is done (no SoC information)
+// and would otherwise keep trying to re-enable a charger that will reject the
+// command until the car disconnects. Status still reports StatusB so evcc
+// does not mistake this for an active charging session.
 func (wb *FoxESSEVC) Enabled() (bool, error) {
+	wb.mu.Lock()
+	finished := wb.finished
+	wb.mu.Unlock()
+	if finished {
+		return true, nil
+	}
+
 	b, err := wb.conn.ReadHoldingRegisters(foxRegStatus, 1)
 	if err != nil {
 		return false, err
@@ -332,9 +348,12 @@ func (wb *FoxESSEVC) Enable(enable bool) error {
 	wb.mu.Unlock()
 
 	// the charger refuses a restart command with a modbus exception once it has
-	// finished the session; the car must disconnect before it will accept one again
+	// finished the session; the car must disconnect before it will accept one
+	// again. Silently ignore the request instead of erroring: Enabled() already
+	// reports true while finished, so evcc has no reason to call this, but stay
+	// defensive in case it does.
 	if enable && finished {
-		return api.ErrNotAvailable
+		return nil
 	}
 
 	wb.mu.Lock()
@@ -592,4 +611,19 @@ var _ loadpoint.Controller = (*FoxESSEVC)(nil)
 // LoadpointControl implements loadpoint.Controller
 func (wb *FoxESSEVC) LoadpointControl(lp loadpoint.API) {
 	wb.lp = lp
+}
+
+var _ api.StatusReasoner = (*FoxESSEVC)(nil)
+
+// StatusReason implements the api.StatusReasoner interface
+func (wb *FoxESSEVC) StatusReason() (api.Reason, error) {
+	wb.mu.Lock()
+	finished := wb.finished
+	wb.mu.Unlock()
+
+	if finished {
+		return api.ReasonDisconnectRequired, nil
+	}
+
+	return api.ReasonUnknown, nil
 }
