@@ -17,3 +17,6 @@ release
 !entrypoint.sh
 !evcc.dist.yaml
 !package*.json
+!tsconfig.json
+!server
+!server/**

@@ -13,9 +13,12 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY Makefile .
 COPY *.js ./
 COPY *.ts *.mts ./
+COPY tsconfig.json .
 COPY .browserslistrc .
 COPY assets assets
 COPY i18n i18n
+COPY scripts scripts
+COPY server server
 
 RUN make ui
 
@@ -45,7 +48,6 @@ RUN --mount=type=cache,target=${GOMODCACHE} go mod download
 # install tools
 COPY Makefile .
 COPY cmd/implement/ cmd/implement/
-COPY cmd/openapi/ cmd/openapi/
 COPY api/ api/
 RUN --mount=type=cache,target=${GOMODCACHE} make install
 
