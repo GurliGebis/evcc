@@ -602,7 +602,7 @@ func TestReconnectVehicle(t *testing.T) {
 			// vehicle not updated yet
 			vehicle.MockChargeState.EXPECT().Status().Return(api.StatusA, nil)
 
-			lp.Update(0, 0, nil, nil, false, false, 0, nil, nil, nil)
+			lp.Update(0, 0, nil, nil, false, false, 0, nil, nil, nil, nil)
 			ctrl.Finish()
 
 			// detection started
@@ -616,7 +616,7 @@ func TestReconnectVehicle(t *testing.T) {
 			// vehicle not updated yet
 			vehicle.MockChargeState.EXPECT().Status().Return(api.StatusB, nil)
 
-			lp.Update(0, 0, nil, nil, false, false, 0, nil, nil, nil)
+			lp.Update(0, 0, nil, nil, false, false, 0, nil, nil, nil, nil)
 			ctrl.Finish()
 
 			// vehicle detected

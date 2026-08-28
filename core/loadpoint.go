@@ -2259,7 +2259,7 @@ func (lp *Loadpoint) phaseSwitchCompleted() bool {
 }
 
 // Update is the main control function. It reevaluates meters and charger state
-func (lp *Loadpoint) Update(sitePower, batteryPower float64, consumption, feedin api.Rates, batteryBuffered, batteryStart bool, greenShare float64, effPrice, effCo2 *float64, dim *bool) {
+func (lp *Loadpoint) Update(sitePower, batteryPower float64, consumption, feedin api.Rates, batteryBuffered, batteryStart bool, greenShare float64, gridPrice, feedInPrice, effCo2 *float64, dim *bool) {
 	// hold battery boost when SOC drops below the limit: stop draining the battery, but
 	// keep the vehicle prioritised over recharging it (via sitePower priorityAdjustment)
 	// until the vehicle disconnects or the limit is relaxed (see SetBatteryBoostLimit).
@@ -2290,7 +2290,7 @@ func (lp *Loadpoint) Update(sitePower, batteryPower float64, consumption, feedin
 	lp.updateChargeVoltages()
 	lp.phasesFromChargeCurrents()
 
-	lp.energyMetrics.SetEnvironment(greenShare, effPrice, effCo2)
+	lp.energyMetrics.SetEnvironment(greenShare, gridPrice, feedInPrice, effCo2)
 
 	// update ChargeRater here to make sure initial meter update is caught
 	lp.bus.Publish(evChargeCurrent, lp.offeredCurrent)
