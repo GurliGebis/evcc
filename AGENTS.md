@@ -40,6 +40,7 @@ Deep documentation on specific subsystems is available in `docs/agents/`. Load w
 | [Web UI & API](docs/agents/web-ui-api.md)                     | REST API, WebSocket, Vue frontend, authentication                            |
 | [API Security](docs/agents/api-security.md)                   | Auth modes, JWT/API key/session, two-tier checks, credential storage         |
 | [Chart Conventions](docs/agents/charts.md)                    | ECharts charts: axis units and scale rules, tooltips, layout                 |
+| [Session Cost Breakdown Plan](docs/agents/session-cost-breakdown-plan.md) | Session cost split (grid/solar/battery), battery cost-basis design |
 
 ### Loading guide by task type
 
@@ -52,6 +53,7 @@ Deep documentation on specific subsystems is available in `docs/agents/`. Load w
 - **API endpoint work** — web-ui-api + core-domain
 - **Auth / login / API key / permissions** — api-security + web-ui-api
 - **Config/template work** — plugin-system
+- **Session cost / battery cost-basis work** — session-cost-breakdown-plan + core-domain
 - **Control loop / charging logic** — core-domain
 - **Bug in any area** — core-domain + relevant topic file(s)
 
