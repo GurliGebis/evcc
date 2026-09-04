@@ -215,3 +215,56 @@ func TestEnergyMetricsGreenShareSplit(t *testing.T) {
 		}
 	})
 }
+
+// TestEnergyMetricsBatteryCostBasis verifies the real battery cost/CO2 basis (#33251 step 3)
+// takes over from the feed-in-price placeholder once set, and that it's cleared on Reset.
+func TestEnergyMetricsBatteryCostBasis(t *testing.T) {
+	f := func(f float64) *float64 { return &f }
+
+	t.Run("falls back to feed-in price when basis unavailable", func(t *testing.T) {
+		var s EnergyMetrics
+		s.SetEnvironment(0.5, f(1), f(2), nil)
+		s.SetGreenShareSplit(0, 0.5) // all green share is battery
+		s.Update(10)                 // 5kWh green, all battery, at feed-in price 2
+
+		batteryCost := s.BatteryCost()
+		if batteryCost == nil || *batteryCost != 10 { // 5kWh * feedin 2
+			t.Errorf("batteryCost = %v, want 10 (feed-in fallback)", batteryCost)
+		}
+		if s.BatteryCo2PerKWh() != nil {
+			t.Errorf("expected nil BatteryCo2PerKWh without a basis, got %v", s.BatteryCo2PerKWh())
+		}
+	})
+
+	t.Run("uses real basis once set", func(t *testing.T) {
+		var s EnergyMetrics
+		s.SetEnvironment(0.5, f(1), f(2), nil)
+		s.SetGreenShareSplit(0, 0.5)
+		s.SetBatteryCostBasis(f(0.5), f(100)) // real basis undercuts the feed-in fallback
+		s.Update(10)                          // 5kWh battery at basis price 0.5, co2 100
+
+		batteryCost := s.BatteryCost()
+		if batteryCost == nil || *batteryCost != 2.5 { // 5kWh * 0.5
+			t.Errorf("batteryCost = %v, want 2.5 (real basis)", batteryCost)
+		}
+		co2PerKWh := s.BatteryCo2PerKWh()
+		if co2PerKWh == nil || *co2PerKWh != 100 {
+			t.Errorf("BatteryCo2PerKWh = %v, want 100", co2PerKWh)
+		}
+	})
+
+	t.Run("reset clears basis and accumulated values", func(t *testing.T) {
+		var s EnergyMetrics
+		s.SetEnvironment(1, f(1), f(1), f(1))
+		s.SetGreenShareSplit(0, 1)
+		s.SetBatteryCostBasis(f(0.5), f(100))
+		s.Update(1)
+		s.Reset()
+		if s.BatteryCost() != nil {
+			t.Errorf("expected BatteryCost to be reset, got %v", s.BatteryCost())
+		}
+		if s.BatteryCo2PerKWh() != nil {
+			t.Errorf("expected BatteryCo2PerKWh to be reset, got %v", s.BatteryCo2PerKWh())
+		}
+	})
+}
