@@ -2,15 +2,21 @@ package core
 
 // EnergyMetrics calculates stats about the charged energy and gives you details about price or co2s
 type EnergyMetrics struct {
-	totalKWh           float64  // Total amount of energy used (kWh)
-	solarKWh           float64  // Self-produced energy (kWh)
-	gridCost           *float64 // Cost of grid-imported energy (Currency)
-	solarCost          *float64 // Opportunity cost of self-consumed solar energy, i.e. foregone feed-in revenue (Currency)
-	co2                *float64 // Amount of emitted CO2 (gCO2eq)
-	currentGreenShare  float64  // Current share of solar energy of site (0-1)
-	currentGridPrice   *float64 // Current grid import price per kWh
-	currentFeedInPrice *float64 // Current feed-in price per kWh, used to value self-consumed solar energy
-	currentCo2         *float64 // Current co2 emissions
+	totalKWh            float64  // Total amount of energy used (kWh)
+	solarKWh            float64  // Self-produced energy (kWh)
+	pvKWh               float64  // Direct-solar share of solarKWh (kWh, #33251 step 2)
+	batteryKWh          float64  // Battery-discharge share of solarKWh (kWh, #33251 step 2)
+	gridCost            *float64 // Cost of grid-imported energy (Currency)
+	solarCost           *float64 // Opportunity cost of self-consumed solar energy, i.e. foregone feed-in revenue (Currency)
+	pvCost              *float64 // Opportunity cost attributable to the direct-solar share of solarCost (Currency, #33251 step 2)
+	batteryCost         *float64 // Opportunity cost attributable to the battery-discharge share of solarCost (Currency, #33251 step 2)
+	co2                 *float64 // Amount of emitted CO2 (gCO2eq)
+	currentGreenShare   float64  // Current share of solar energy of site (0-1)
+	currentPvShare      float64  // Current direct-solar share of site energy (0-1, #33251 step 2)
+	currentBatteryShare float64  // Current battery-discharge share of site energy (0-1, #33251 step 2)
+	currentGridPrice    *float64 // Current grid import price per kWh
+	currentFeedInPrice  *float64 // Current feed-in price per kWh, used to value self-consumed solar energy
+	currentCo2          *float64 // Current co2 emissions
 }
 
 // SetEnvironment updates site information like solar share, grid and feed-in price, and co2 for use in later calculations
@@ -19,6 +25,16 @@ func (em *EnergyMetrics) SetEnvironment(greenShare float64, gridPrice, feedInPri
 	em.currentGridPrice = gridPrice
 	em.currentFeedInPrice = feedInPrice
 	em.currentCo2 = effCo2
+}
+
+// SetGreenShareSplit records the direct-solar vs. battery-discharge split of the green share
+// (#33251 step 2, additive/optional: pvShare+batteryShare is expected to equal the greenShare
+// passed to SetEnvironment, see Site.greenShareBySource). Until #33251 step 3 lands, both are
+// valued identically (at feed-in price, like today's combined SolarCost) - only the accounting
+// is split here so step 3 only has to change how the battery share is priced.
+func (em *EnergyMetrics) SetGreenShareSplit(pvShare, batteryShare float64) {
+	em.currentPvShare = pvShare
+	em.currentBatteryShare = batteryShare
 }
 
 // Update sets the a new value for the total amount of charged energy and updated metrics based on environment values.
@@ -33,6 +49,13 @@ func (em *EnergyMetrics) Update(chargedKWh float64) (float64, float64) {
 	addedGreen := added * em.currentGreenShare
 	addedGrid := added - addedGreen
 	em.solarKWh += addedGreen
+	// pv/battery split (#33251 step 2), only tracked once SetGreenShareSplit has been called
+	addedPv := added * em.currentPvShare
+	addedBattery := added * em.currentBatteryShare
+	if em.currentPvShare != 0 || em.currentBatteryShare != 0 {
+		em.pvKWh += addedPv
+		em.batteryKWh += addedBattery
+	}
 	// optional values
 	if em.currentGridPrice != nil {
 		addedCost := *em.currentGridPrice * addedGrid
@@ -49,6 +72,24 @@ func (em *EnergyMetrics) Update(chargedKWh float64) (float64, float64) {
 			newCost = *em.solarCost + newCost
 		}
 		em.solarCost = &newCost
+
+		// pv/battery cost split (#33251 step 2): both still valued at feed-in price
+		// until step 3 introduces a real battery cost basis
+		if em.currentPvShare != 0 || em.currentBatteryShare != 0 {
+			addedPvCost := *em.currentFeedInPrice * addedPv
+			newPvCost := addedPvCost
+			if em.pvCost != nil {
+				newPvCost = *em.pvCost + newPvCost
+			}
+			em.pvCost = &newPvCost
+
+			addedBatteryCost := *em.currentFeedInPrice * addedBattery
+			newBatteryCost := addedBatteryCost
+			if em.batteryCost != nil {
+				newBatteryCost = *em.batteryCost + newBatteryCost
+			}
+			em.batteryCost = &newBatteryCost
+		}
 	}
 	if em.currentCo2 != nil {
 		addedCo2 := *em.currentCo2 * added
@@ -65,8 +106,12 @@ func (em *EnergyMetrics) Update(chargedKWh float64) (float64, float64) {
 func (em *EnergyMetrics) Reset() {
 	em.totalKWh = 0
 	em.solarKWh = 0
+	em.pvKWh = 0
+	em.batteryKWh = 0
 	em.gridCost = nil
 	em.solarCost = nil
+	em.pvCost = nil
+	em.batteryCost = nil
 	em.co2 = nil
 }
 
@@ -98,6 +143,26 @@ func (em *EnergyMetrics) SolarCost() *float64 {
 		return nil
 	}
 	return em.solarCost
+}
+
+// PvCost returns the opportunity cost attributable to the direct-solar share of SolarCost in
+// Currency (#33251 step 2). Valued at feed-in price, same as SolarCost, until #33251 step 3
+// introduces a real battery cost basis.
+func (em *EnergyMetrics) PvCost() *float64 {
+	if em.totalKWh == 0 || em.pvCost == nil {
+		return nil
+	}
+	return em.pvCost
+}
+
+// BatteryCost returns the opportunity cost attributable to the battery-discharge share of
+// SolarCost in Currency (#33251 step 2). Valued at feed-in price, same as SolarCost, until
+// #33251 step 3 introduces a real battery cost basis.
+func (em *EnergyMetrics) BatteryCost() *float64 {
+	if em.totalKWh == 0 || em.batteryCost == nil {
+		return nil
+	}
+	return em.batteryCost
 }
 
 // Price returns the total energy price in Currency, the sum of grid cost and solar opportunity cost
@@ -142,5 +207,7 @@ func (em *EnergyMetrics) Publish(prefix string, p publisher) {
 	p.publish(prefix+"Price", em.Price())
 	p.publish(prefix+"GridCost", em.GridCost())
 	p.publish(prefix+"SolarCost", em.SolarCost())
+	p.publish(prefix+"PvCost", em.PvCost())
+	p.publish(prefix+"BatteryCost", em.BatteryCost())
 	p.publish(prefix+"Co2PerKWh", em.Co2PerKWh())
 }

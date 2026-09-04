@@ -184,6 +184,25 @@ func TestGreenShare(t *testing.T) {
 		if greenShareLoadpoints != tc.greenShareLoadpoints {
 			t.Errorf("greenShareLoadpoints wanted %.3f, got %.3f", tc.greenShareLoadpoints, greenShareLoadpoints)
 		}
+
+		// pvShare + batteryShare must always reconstruct the combined greenShare (#33251 step 2)
+		for _, r := range []struct {
+			name           string
+			from, to       float64
+			wantGreenShare float64
+		}{
+			{"total", 0, totalPower, greenShareTotal},
+			{"home", 0, tc.home, greenShareHome},
+			{"loadpoints", tc.home + max(0, -tc.battery), totalPower, greenShareLoadpoints},
+		} {
+			pvShare, batteryShare := s.greenShareBySource(r.from, r.to)
+			if got := pvShare + batteryShare; got != r.wantGreenShare {
+				t.Errorf("%s: pvShare(%.3f)+batteryShare(%.3f) wanted %.3f, got %.3f", r.name, pvShare, batteryShare, r.wantGreenShare, got)
+			}
+			if pvShare < 0 || batteryShare < 0 {
+				t.Errorf("%s: pvShare(%.3f)/batteryShare(%.3f) must not be negative", r.name, pvShare, batteryShare)
+			}
+		}
 	}
 }
 

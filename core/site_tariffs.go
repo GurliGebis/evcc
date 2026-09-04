@@ -82,6 +82,46 @@ func (site *Site) greenShare(powerFrom float64, powerTo float64) float64 {
 	return share
 }
 
+// greenShareBySource splits greenShare into its PV and battery-discharge components for the
+// part of the consumption between powerFrom and powerTo. PV serves the lower part of that
+// range first (matching real inverter dispatch priority), battery discharge only covers the
+// remaining deficit PV can't. pvShare + batteryShare always equals greenShare(powerFrom, powerTo).
+func (site *Site) greenShareBySource(powerFrom float64, powerTo float64) (pvShare, batteryShare float64) {
+	state := site.state()
+
+	pvPower := math.Max(0, state.pvPower)
+	batteryPower := math.Max(0, state.battery.Power)
+
+	pvAvailable := math.Max(0, pvPower-powerFrom)
+	greenAvailable := math.Max(0, pvPower+batteryPower-powerFrom)
+	// battery only fills the deficit PV can't cover within the window
+	batteryAvailable := greenAvailable - pvAvailable
+
+	power := powerTo - powerFrom
+	pvServed := math.Min(pvAvailable, power)
+	batteryServed := math.Min(batteryAvailable, math.Max(0, power-pvServed))
+
+	pvShare = pvServed / power
+	batteryShare = batteryServed / power
+
+	if math.IsNaN(pvShare) {
+		if pvAvailable > 0 {
+			pvShare = 1
+		} else {
+			pvShare = 0
+		}
+	}
+	if math.IsNaN(batteryShare) {
+		if batteryAvailable > 0 && pvAvailable == 0 {
+			batteryShare = 1
+		} else {
+			batteryShare = 0
+		}
+	}
+
+	return pvShare, batteryShare
+}
+
 // effectivePrice calculates the real energy price based on self-produced and grid-imported energy.
 func (site *Site) effectivePrice(greenShare float64) *float64 {
 	if grid, err := tariff.Now(site.GetTariff(api.TariffUsageGrid)); err == nil {
