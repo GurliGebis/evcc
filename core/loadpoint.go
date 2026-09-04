@@ -2264,6 +2264,12 @@ func (lp *Loadpoint) SetGreenShareSplit(pvShare, batteryShare float64) {
 	lp.energyMetrics.SetGreenShareSplit(pvShare, batteryShare)
 }
 
+// SetBatteryCostBasis records the battery's real per-kWh price/CO2 basis for cost-attribution
+// purposes (#33251 step 3). See Site.batteryCostBasis.
+func (lp *Loadpoint) SetBatteryCostBasis(price, co2 *float64) {
+	lp.energyMetrics.SetBatteryCostBasis(price, co2)
+}
+
 // Update is the main control function. It reevaluates meters and charger state
 func (lp *Loadpoint) Update(sitePower, batteryPower float64, consumption, feedin api.Rates, batteryBuffered, batteryStart bool, greenShare float64, gridPrice, feedInPrice, effCo2 *float64, dim *bool) {
 	// hold battery boost when SOC drops below the limit: stop draining the battery, but

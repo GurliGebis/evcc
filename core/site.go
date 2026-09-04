@@ -48,6 +48,7 @@ type updater interface {
 	loadpoint.API
 	Update(sitePower, batteryPower float64, consumption, feedin api.Rates, batteryBuffered, batteryStart bool, greenShare float64, gridPrice, feedInPrice, effectiveCo2 *float64, dim *bool)
 	SetGreenShareSplit(pvShare, batteryShare float64)
+	SetBatteryCostBasis(price, co2 *float64)
 }
 
 var _ site.API = (*Site)(nil)
@@ -124,7 +125,8 @@ type Site struct {
 	optimizerMu      sync.Mutex // guards optimizer runs
 	optimizerUpdated time.Time  // last optimizer run, guarded by optimizerMu
 
-	solarScaleCached func() (float64, error) // util.Cached wrapper around querySolarScale
+	solarScaleCached       func() (float64, error)                // util.Cached wrapper around querySolarScale
+	batteryCostBasisCached func() (batteryCostBasisResult, error) // util.Cached wrapper around batteryCostBasis (#33251 step 3)
 }
 
 // siteState is the site's cached measurement state, updated once per meter cycle
@@ -410,6 +412,13 @@ func NewSite() *Site {
 		}
 		return scale, err
 	}, 24*time.Hour)
+
+	// underlying history/tariff data only changes at 15min slot boundaries, no point
+	// re-querying more often (#33251 step 3)
+	site.batteryCostBasisCached = util.Cached(func() (batteryCostBasisResult, error) {
+		price, co2 := site.batteryCostBasis()
+		return batteryCostBasisResult{price, co2}, nil
+	}, tariff.SlotDuration)
 
 	return site
 }
@@ -1359,6 +1368,9 @@ func (site *Site) updatePower(lp updater, state siteState, totalChargePower floa
 			hems.Dimmed(site.hems),
 		)
 		lp.SetGreenShareSplit(pvShareLoadpoints, batteryShareLoadpoints)
+
+		batteryPrice, batteryCo2 := site.cachedBatteryCostBasis()
+		lp.SetBatteryCostBasis(batteryPrice, batteryCo2)
 	}
 
 	site.publishTariffs(greenShareHome, greenShareLoadpoints)

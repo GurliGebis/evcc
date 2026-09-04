@@ -9,13 +9,16 @@ type EnergyMetrics struct {
 	gridCost            *float64 // Cost of grid-imported energy (Currency)
 	solarCost           *float64 // Opportunity cost of self-consumed solar energy, i.e. foregone feed-in revenue (Currency)
 	pvCost              *float64 // Opportunity cost attributable to the direct-solar share of solarCost (Currency, #33251 step 2)
-	batteryCost         *float64 // Cost attributable to the battery-discharge share of solarCost (Currency, #33251 step 2)
+	batteryCost         *float64 // Cost attributable to the battery-discharge share of solarCost (Currency, #33251 step 2/3)
+	batteryCo2          *float64 // Amount of CO2 attributable to the battery-discharge share (gCO2eq, #33251 step 3)
 	co2                 *float64 // Amount of emitted CO2 (gCO2eq)
 	currentGreenShare   float64  // Current share of solar energy of site (0-1)
 	currentPvShare      float64  // Current direct-solar share of site energy (0-1, #33251 step 2)
 	currentBatteryShare float64  // Current battery-discharge share of site energy (0-1, #33251 step 2)
 	currentGridPrice    *float64 // Current grid import price per kWh
 	currentFeedInPrice  *float64 // Current feed-in price per kWh, used to value self-consumed solar energy
+	currentBatteryPrice *float64 // Current battery per-kWh cost basis (#33251 step 3, see Site.batteryCostBasis); falls back to currentFeedInPrice when nil
+	currentBatteryCo2   *float64 // Current battery per-kWh CO2 basis (#33251 step 3, see Site.batteryCostBasis); nil when unknown
 	currentCo2          *float64 // Current co2 emissions
 }
 
@@ -33,6 +36,15 @@ func (em *EnergyMetrics) SetEnvironment(greenShare float64, gridPrice, feedInPri
 func (em *EnergyMetrics) SetGreenShareSplit(pvShare, batteryShare float64) {
 	em.currentPvShare = pvShare
 	em.currentBatteryShare = batteryShare
+}
+
+// SetBatteryCostBasis records the battery's real per-kWh price/CO2 basis, computed by replaying
+// its charge history backward (#33251 step 3, see Site.batteryCostBasis). When price is nil
+// (e.g. unreliable battery capacity, or no persisted history yet), battery-sourced energy keeps
+// being valued at the feed-in price, same as direct solar, until a basis becomes available.
+func (em *EnergyMetrics) SetBatteryCostBasis(price, co2 *float64) {
+	em.currentBatteryPrice = price
+	em.currentBatteryCo2 = co2
 }
 
 // Update sets the a new value for the total amount of charged energy and updated metrics based on environment values.
@@ -71,8 +83,7 @@ func (em *EnergyMetrics) Update(chargedKWh float64) (float64, float64) {
 		}
 		em.solarCost = &newCost
 
-		// pv/battery cost split (#33251 step 2): both still valued at feed-in price, same as
-		// solarCost, until Site.batteryCostBasis introduces a real battery cost basis
+		// pv cost split (#33251 step 2): still valued at feed-in price, same as solarCost
 		if em.currentPvShare != 0 || em.currentBatteryShare != 0 {
 			addedPvCost := *em.currentFeedInPrice * addedPv
 			newPvCost := addedPvCost
@@ -80,13 +91,31 @@ func (em *EnergyMetrics) Update(chargedKWh float64) (float64, float64) {
 				newPvCost = *em.pvCost + newPvCost
 			}
 			em.pvCost = &newPvCost
-
-			addedBatteryCost := *em.currentFeedInPrice * addedBattery
+		}
+	}
+	// battery cost/CO2 split (#33251 step 2/3): valued at the real cost basis when available
+	// (Site.batteryCostBasis via SetBatteryCostBasis), falling back to the feed-in price like
+	// direct solar otherwise
+	if em.currentPvShare != 0 || em.currentBatteryShare != 0 {
+		batteryPrice := em.currentBatteryPrice
+		if batteryPrice == nil {
+			batteryPrice = em.currentFeedInPrice
+		}
+		if batteryPrice != nil {
+			addedBatteryCost := *batteryPrice * addedBattery
 			newBatteryCost := addedBatteryCost
 			if em.batteryCost != nil {
 				newBatteryCost = *em.batteryCost + newBatteryCost
 			}
 			em.batteryCost = &newBatteryCost
+		}
+		if em.currentBatteryCo2 != nil {
+			addedBatteryCo2 := *em.currentBatteryCo2 * addedBattery
+			newBatteryCo2 := addedBatteryCo2
+			if em.batteryCo2 != nil {
+				newBatteryCo2 = *em.batteryCo2 + newBatteryCo2
+			}
+			em.batteryCo2 = &newBatteryCo2
 		}
 	}
 	if em.currentCo2 != nil {
@@ -110,6 +139,7 @@ func (em *EnergyMetrics) Reset() {
 	em.solarCost = nil
 	em.pvCost = nil
 	em.batteryCost = nil
+	em.batteryCo2 = nil
 	em.co2 = nil
 }
 
@@ -153,12 +183,25 @@ func (em *EnergyMetrics) PvCost() *float64 {
 }
 
 // BatteryCost returns the cost attributable to the battery-discharge share of SolarCost in
-// Currency (#33251 step 2). Valued at feed-in price, same as direct solar.
+// Currency (#33251 step 2/3). Valued at the battery's real cost basis (see
+// Site.batteryCostBasis/SetBatteryCostBasis) when available, falling back to the feed-in
+// price like direct solar otherwise.
 func (em *EnergyMetrics) BatteryCost() *float64 {
 	if em.totalKWh == 0 || em.batteryCost == nil {
 		return nil
 	}
 	return em.batteryCost
+}
+
+// BatteryCo2PerKWh returns the average CO2 emissions per kWh attributable to the
+// battery-discharge share of energy (gCO2eq, #33251 step 3), nil when the battery's real CO2
+// basis is unavailable (see Site.batteryCostBasis/SetBatteryCostBasis).
+func (em *EnergyMetrics) BatteryCo2PerKWh() *float64 {
+	if em.batteryKWh == 0 || em.batteryCo2 == nil {
+		return nil
+	}
+	co2 := *em.batteryCo2 / em.batteryKWh
+	return &co2
 }
 
 // Price returns the total energy price in Currency, the sum of grid cost and solar opportunity cost
@@ -206,4 +249,5 @@ func (em *EnergyMetrics) Publish(prefix string, p publisher) {
 	p.publish(prefix+"PvCost", em.PvCost())
 	p.publish(prefix+"BatteryCost", em.BatteryCost())
 	p.publish(prefix+"Co2PerKWh", em.Co2PerKWh())
+	p.publish(prefix+"BatteryCo2PerKWh", em.BatteryCo2PerKWh())
 }
