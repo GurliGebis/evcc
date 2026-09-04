@@ -88,3 +88,41 @@ func PersistTariffs(ts time.Time, grid, feedin, co2, temperature *float64) error
 		Temperature: temperature,
 	}).Error
 }
+
+// TariffSlot is a single persisted tariff-price/CO2 sample at a 15min slot boundary
+type TariffSlot struct {
+	Start  time.Time
+	Grid   *float64
+	FeedIn *float64
+	Co2    *float64
+}
+
+// QueryTariffs returns persisted tariff values in [from,to), ordered ascending by time.
+// A zero from/to leaves that bound unlimited, matching QueryEnergy.
+func QueryTariffs(from, to time.Time) ([]TariffSlot, error) {
+	tx := db.Instance.Model(new(tariffValue)).Order("ts")
+
+	if !from.IsZero() {
+		tx = tx.Where("ts >= ?", from.Unix())
+	}
+	if !to.IsZero() {
+		tx = tx.Where("ts < ?", to.Unix())
+	}
+
+	var rows []tariffValue
+	if err := tx.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	res := make([]TariffSlot, 0, len(rows))
+	for _, r := range rows {
+		res = append(res, TariffSlot{
+			Start:  time.Unix(r.Timestamp, 0),
+			Grid:   r.Grid,
+			FeedIn: r.FeedIn,
+			Co2:    r.Co2,
+		})
+	}
+
+	return res, nil
+}
