@@ -47,6 +47,7 @@ const standbyPower = 10 // consider less than 10W as charger in standby
 type updater interface {
 	loadpoint.API
 	Update(sitePower, batteryPower float64, consumption, feedin api.Rates, batteryBuffered, batteryStart bool, greenShare float64, gridPrice, feedInPrice, effectiveCo2 *float64, dim *bool)
+	SetGreenShareSplit(pvShare, batteryShare float64)
 }
 
 var _ site.API = (*Site)(nil)
@@ -1337,6 +1338,7 @@ func (site *Site) updatePower(lp updater, state siteState, totalChargePower floa
 	nonChargePower := homePower + max(0, -state.battery.Power)
 	greenShareHome := site.greenShare(0, homePower)
 	greenShareLoadpoints := site.greenShare(nonChargePower, nonChargePower+totalChargePower)
+	pvShareLoadpoints, batteryShareLoadpoints := site.greenShareBySource(nonChargePower, nonChargePower+totalChargePower)
 
 	// TODO
 	if lp != nil {
@@ -1356,6 +1358,7 @@ func (site *Site) updatePower(lp updater, state siteState, totalChargePower floa
 			greenShareLoadpoints, site.gridPrice(), site.feedInPrice(), site.effectiveCo2(greenShareLoadpoints),
 			hems.Dimmed(site.hems),
 		)
+		lp.SetGreenShareSplit(pvShareLoadpoints, batteryShareLoadpoints)
 	}
 
 	site.publishTariffs(greenShareHome, greenShareLoadpoints)

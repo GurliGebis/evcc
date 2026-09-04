@@ -161,3 +161,57 @@ func TestEnergyMetrics(t *testing.T) {
 		t.Errorf("Metrics not properly reset %+v", s)
 	}
 }
+
+// TestEnergyMetricsGreenShareSplit verifies the pv/battery cost split introduced in #33251
+// step 2: PvCost/BatteryCost must always sum to SolarCost (both are valued at feed-in price),
+// and stay nil when SetGreenShareSplit was never called (backward compatible with callers
+// that only use SetEnvironment).
+func TestEnergyMetricsGreenShareSplit(t *testing.T) {
+	f := func(f float64) *float64 { return &f }
+
+	t.Run("split unused stays nil", func(t *testing.T) {
+		var s EnergyMetrics
+		s.SetEnvironment(0.5, f(1), f(1), nil)
+		s.Update(2)
+
+		if s.PvCost() != nil || s.BatteryCost() != nil {
+			t.Errorf("expected nil PvCost/BatteryCost without SetGreenShareSplit, got %v/%v", s.PvCost(), s.BatteryCost())
+		}
+		if s.SolarCost() == nil {
+			t.Error("expected SolarCost to still be tracked")
+		}
+	})
+
+	t.Run("split sums to solar cost", func(t *testing.T) {
+		var s EnergyMetrics
+		s.SetEnvironment(0.5, f(1), f(2), nil) // greenShare 0.5, feedin 2
+		s.SetGreenShareSplit(0.3, 0.2)         // pv 0.3, battery 0.2 of 0.5 green share
+		s.Update(10)                           // 10kWh charged: 5kWh grid, 5kWh green (3kWh pv, 2kWh battery)
+
+		gridCost, solarCost := s.GridCost(), s.SolarCost()
+		pvCost, batteryCost := s.PvCost(), s.BatteryCost()
+		if gridCost == nil || solarCost == nil || pvCost == nil || batteryCost == nil {
+			t.Fatalf("expected all costs to be set, got grid=%v solar=%v pv=%v battery=%v", gridCost, solarCost, pvCost, batteryCost)
+		}
+		if got, want := *pvCost+*batteryCost, *solarCost; got != want {
+			t.Errorf("pvCost(%.3f)+batteryCost(%.3f) = %.3f, want solarCost %.3f", *pvCost, *batteryCost, got, want)
+		}
+		if want := 6.0; *pvCost != want { // 3kWh * feedin 2
+			t.Errorf("pvCost = %.3f, want %.3f", *pvCost, want)
+		}
+		if want := 4.0; *batteryCost != want { // 2kWh * feedin 2
+			t.Errorf("batteryCost = %.3f, want %.3f", *batteryCost, want)
+		}
+	})
+
+	t.Run("reset clears split", func(t *testing.T) {
+		var s EnergyMetrics
+		s.SetEnvironment(1, f(1), f(1), f(1))
+		s.SetGreenShareSplit(0.6, 0.4)
+		s.Update(1)
+		s.Reset()
+		if s.PvCost() != nil || s.BatteryCost() != nil {
+			t.Errorf("expected PvCost/BatteryCost to be reset, got %v/%v", s.PvCost(), s.BatteryCost())
+		}
+	})
+}
