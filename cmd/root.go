@@ -498,7 +498,7 @@ func runRoot(cmd *cobra.Command, args []string) {
 		valueChan <- util.Param{Key: keys.DemoMode, Val: true}
 	}
 
-	httpd.RegisterSystemHandler(site, func(k string, v any) {
+	httpd.RegisterSystemHandler(site, conf, func(k string, v any) {
 		valueChan <- util.Param{Key: k, Val: v}
 	}, cache, authObject, func() {
 		log.INFO.Println("evcc was stopped by user. OS should restart the service. Or restart manually.")
