@@ -917,7 +917,16 @@
         },
         "cancel": "Cancel",
         "description": "Backup, restore and reset your data. Useful if you want to move your data to another system.",
-        "note": "Note: All above actions only affect your database data. The evcc.yaml configuration file remains unchanged.",
+        "export": {
+          "action": "Export configuration...",
+          "confirmationButton": "Download configuration",
+          "confirmationText": "Download your complete running configuration (from evcc.yaml and/or the database) as a yaml file.",
+          "description": "Download your complete running configuration, combining evcc.yaml and the database, as a yaml file.",
+          "includeSecrets": "Include secrets (passwords, tokens, access keys)",
+          "includeSecretsWarning": "The downloaded file will contain plain text secrets. Handle it carefully.",
+          "title": "Export configuration"
+        },
+        "note": "Note: Backup, restore and reset only affect your database data and leave evcc.yaml unchanged. Export just downloads your current configuration and doesn't change anything.",
         "reset": {
           "action": "Reset...",
           "confirmationButton": "Reset & restart",

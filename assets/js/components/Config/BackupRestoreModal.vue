@@ -56,6 +56,39 @@
 			</div>
 			<div class="mb-3">
 				<h6>
+					{{ $t("config.system.backupRestore.export.title") }}
+				</h6>
+				<p>
+					{{ $t("config.system.backupRestore.export.description") }}
+				</p>
+
+				<div class="d-flex mb-1">
+					<input
+						id="exportIncludeSecrets"
+						v-model="exportIncludeSecrets"
+						class="form-check-input"
+						type="checkbox"
+					/>
+					<label class="form-check-label ms-2" for="exportIncludeSecrets">
+						{{ $t("config.system.backupRestore.export.includeSecrets") }}
+					</label>
+				</div>
+				<p v-if="exportIncludeSecrets" class="text-danger">
+					<small>
+						{{ $t("config.system.backupRestore.export.includeSecretsWarning") }}
+					</small>
+				</p>
+
+				<button
+					data-testid="config-export-open-confirm-modal"
+					class="btn btn-outline-secondary mt-2"
+					@click="openBackupRestoreConfirmModal('export')"
+				>
+					{{ $t("config.system.backupRestore.export.action") }}
+				</button>
+			</div>
+			<div class="mb-3">
+				<h6>
 					{{ $t("config.system.backupRestore.reset.title") }}
 				</h6>
 				<p>{{ $t("config.system.backupRestore.reset.description") }}</p>
@@ -169,7 +202,11 @@
 						data-testid="backup-restore-download"
 						type="submit"
 						class="btn text-truncate"
-						:class="confirmType === 'backup' ? 'btn-primary' : 'btn-danger'"
+						:class="
+							confirmType === 'restore' || confirmType === 'reset'
+								? 'btn-danger'
+								: 'btn-primary'
+						"
 						:disabled="loading"
 					>
 						<span
@@ -215,7 +252,8 @@ export default defineComponent({
 				remote: false,
 			},
 			file: null as File | null,
-			confirmType: "" as "backup" | "restore" | "reset" | "",
+			confirmType: "" as "backup" | "restore" | "reset" | "export" | "",
+			exportIncludeSecrets: false,
 			password: "",
 			loading: false,
 			iframeHint: false,
@@ -252,6 +290,7 @@ export default defineComponent({
 				remote: false,
 			};
 			this.file = null;
+			this.exportIncludeSecrets = false;
 			this.navigateHomeAfterRestart = false;
 			this.hideBackupRestoreModal = false;
 			(
@@ -361,11 +400,31 @@ export default defineComponent({
 				showRestarting();
 			}
 		},
+		async exportConfig() {
+			const headers = { "X-Admin-Password": this.password };
+			const url = this.exportIncludeSecrets
+				? "/config/export?private=false"
+				: "/config/export";
+
+			if (dispatchDownload(`/api${url}`, headers)) {
+				this.closeConfirmModal();
+				return;
+			}
+			const res = await this.call(
+				api.get(url, { headers, responseType: "blob", validateStatus })
+			);
+			if (res) {
+				this.closeConfirmModal();
+				downloadFile(res);
+			}
+		},
 		async submit() {
 			if (this.confirmType === "backup") {
 				await this.downloadBackup();
 			} else if (this.confirmType === "restore") {
 				await this.restoreDatabase();
+			} else if (this.confirmType === "export") {
+				await this.exportConfig();
 			} else {
 				await this.resetDatabase();
 			}

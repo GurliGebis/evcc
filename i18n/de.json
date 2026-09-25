@@ -917,7 +917,16 @@
         },
         "cancel": "Abbrechen",
         "description": "Sichern, wiederherstellen und zurücksetzen deiner Daten. Nützlich, wenn du deine Daten auf ein anderes System übertragen möchtest.",
-        "note": "Hinweis: Alle oben genannten Aktionen betreffen nur deine Datenbankdaten. Die evcc.yaml-Konfigurationsdatei bleibt unverändert.",
+        "export": {
+          "action": "Konfiguration exportieren...",
+          "confirmationButton": "Konfiguration herunterladen",
+          "confirmationText": "Lade deine vollständige aktive Konfiguration (aus evcc.yaml und/oder der Datenbank) als YAML-Datei herunter.",
+          "description": "Lade deine vollständige aktive Konfiguration, aus evcc.yaml und der Datenbank zusammengeführt, als YAML-Datei herunter.",
+          "includeSecrets": "Geheimnisse einschließen (Passwörter, Tokens, Zugangsschlüssel)",
+          "includeSecretsWarning": "Die heruntergeladene Datei enthält Geheimnisse im Klartext. Gehe sorgfältig damit um.",
+          "title": "Konfiguration exportieren"
+        },
+        "note": "Hinweis: Sichern, Wiederherstellen und Zurücksetzen betreffen nur deine Datenbankdaten, die evcc.yaml bleibt unverändert. Export lädt nur deine aktuelle Konfiguration herunter und ändert nichts.",
         "reset": {
           "action": "Zurücksetzen...",
           "confirmationButton": "Zurücksetzen & Neustart",
