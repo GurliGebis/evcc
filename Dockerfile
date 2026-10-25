@@ -31,6 +31,9 @@ RUN apk update && apk add --no-cache git make patch tzdata ca-certificates && up
 # define RELEASE=1 to hide commit hash
 ARG RELEASE=0
 
+# optional version override, defaults to git describe
+ARG TAG_NAME=
+
 WORKDIR /build
 
 # Setup Go cache
@@ -63,7 +66,7 @@ ARG TARGETVARIANT
 ARG GOARM=${TARGETVARIANT#v}
 
 RUN --mount=type=cache,target=${GOCACHE} --mount=type=cache,target=${GOMODCACHE} \
-    RELEASE=${RELEASE} GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${GOARM} make build
+    RELEASE=${RELEASE} GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${GOARM} make build ${TAG_NAME:+TAG_NAME=${TAG_NAME}}
 
 
 # STEP 3 build a small image including module support
