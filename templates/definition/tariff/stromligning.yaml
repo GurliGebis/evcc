@@ -30,12 +30,14 @@ params:
     example: radius_c
     description:
       generic: Grid supplier ID
+    service: http/get?uri=https://stromligning.dk/api/suppliers&jq=[.[].id]
   - name: customergroupid
     example: C_egenproducent
     description:
       generic: Customer group ID
     help:
       en: "For production prices, leave empty to select the production customer group automatically."
+    service: http/get?uri=https://stromligning.dk/api/suppliers&jq=[.[]|select(.id=="{supplierid}")|.customerGroups[].id]
   - name: agreementstart
     example: "2025-03-01"
     description:
